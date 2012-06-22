@@ -11,51 +11,122 @@ modify it under the terms of the GNU Lesser General Public
 License as published by the Free Software Foundation; either
 version 2.1 of the License, or (at your option) any later version.
 
+This program is intended to operate with a maximum rotorspeed of 4000rpm.
+4000rpm = 66.667rev/sec = 0.015sec/rev = 15ms/rev = 15000uS/rev
+Also:
+800rpm = 13.333rev/sec = 0.075sec/rev = 75ms/rev = 75000uS/rev
+
+1ms accuracy would give between 10 and 250rpm resolution which is not acceptable
+Thus, we must use microseconds to measure RPM.
+Atmega chip operating at 16MHz has 4uS resolution, 8MHz gives 8uS resolution. 
+4uS resolution will give an RPM resolution of ~ 0.05 to 1 rpm.
+Better than 0.025% accuracy!
+
+Maximum intended motor RPM is 50,000 representing a 450 heli running 4S battery
+50000rpm = 833rev/sec = 0.0012sec/rev = 1200uS/rev
+4uS accuracy would give 166rpm accuracy, or 0.3%.
+
+micros() counter will overflow after ~70 minutes, we must protect for that
+to avoid an error or blip in the speed reading.
+
+
 */
 
 #include <SCDriver.h> 
 
-volatile byte rpmcount;
-unsigned int rpm;
-unsigned long timeold;
-int pos = 0;    // variable to store the servo position 
+unsigned int rpm;								// Latest RPM value
+volatile unsigned long trigger_time;			// Trigger time of latest interrupt
+volatile unsigned long trigger_time_old;		// Trigger time of last interrupt
+unsigned long last_calc_time;					// Trigger time of last speed calculated
+unsigned int timing;							// Timing of last rotation
+unsigned int timing_old;						// Old rotation timing
 
-SCDriver SCOutput;
+
+
+static unsigned long fast_loopTimer;			// Time in microseconds of 1000hz control loop
+static unsigned long fiftyhz_loopTimer;			// Time in microseconds of 50hz control loop
+static unsigned long tenhz_loopTimer;			// Time in microseconds of the 10hz control loop
+static unsigned long onehz_loopTimer;			// Time in microseconds of the 1hz control loop
+
+unsigned int rotation_time;						// Time in microseconds for one rotation of rotor
+
+SCDriver SCOutput;								// Create Speed Control output object
 
 void setup(){
    Serial.begin(9600);
    attachInterrupt(0, rpm_fun, RISING);
-   rpmcount = 0;
    rpm = 0;
-   timeold = 0;
    SCOutput.attach(9);
 }
 
 void loop(){
 
-	if (rpmcount >= 20) { 
-		//Update RPM every 20 counts, increase this for better RPM resolution,
-		//decrease for faster update
-		rpm = 30*1000/(millis() - timeold)*rpmcount;
-		timeold = millis();
-		rpmcount = 0;
-		Serial.println(rpm,DEC);
+	unsigned long timer = micros();
+
+	if ((timer - fast_loopTimer) >= 1000){
+	
+		fast_loopTimer = timer;
+		fastloop();
+
+	}	
+	
+	if ((timer - fiftyhz_loopTimer) >= 20000) {
+	
+		fiftyhz_loopTimer = timer;
+		mediumloop();
+	
 	}
 	
-	for(pos = 0; pos < 1000; pos += 10){ 	// goes from 0% to 100% 
-											// in steps of 1%
-		SCOutput.write(pos);            	// tell servo to go to position in variable 'pos' 
-		delay(15);                      	// waits 15ms for the servo to reach the position 
-	} 
+	if ((timer - tenhz_loopTimer) >= 100000) {
 	
-	for(pos = 1000; pos>=10; pos-=10){    	// goes from 100% to 0%                              
-		SCOutput.write(pos);              	// tell servo to go to position in variable 'pos' 
-		delay(15);                       	// waits 15ms for the servo to reach the position 
-	} 
+		tenhz_loopTimer = timer;
+		slowloop();
+	
+	}
+	
+	if ((timer - onehz_loopTimer) >= 1000000) {
+	
+		onehz_loopTimer = timer;
+		superslowloop();
+	
+	}
+	
 }
 
-void rpm_fun(){
-	rpmcount++;
-	//Each rotation, this interrupt function is run twice
+void rpm_fun(){							//Each rotation, this interrupt function is run
+	trigger_time_old = trigger_time;
+	trigger_time = micros();
 }
+
+void fastloop(){			//1000hz stuff goes here
+
+	if (last_calc_time < trigger_time){					//micros() timer has not overflowed
+		
+		if (last_calc_time != trigger_time){			//We have new timing data
+			timing = trigger_time - trigger_time_old;
+			timing = (timing + timing_old)/2;			//Simple filter
+			last_calc_time = trigger_time;
+		}
+	}else{												//micros() timer has overflowed
+
+		last_calc_time = trigger_time;					//we will skip this iteration
+
+	}
+}
+
+void mediumloop(){			//50hz stuff goes here
+
+	rpm = 60000000/timing;
+
+}
+
+void slowloop(){			//10hz stuff goes here
+
+}
+
+void superslowloop(){		//1hz stuff goes here
+
+}
+
+
 
