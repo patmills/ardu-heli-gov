@@ -34,12 +34,29 @@ to avoid an error or blip in the speed reading.
 
 #include <SCDriver.h> 
 
-unsigned int rpm;								// Latest RPM value
+#define BoardLED 13
+
+// Measurement Type can be either Direct_Measurement, meaning actual
+// propeller measurement.  Or it can be Motor_Measurement.  Motor_Measurement
+// requires input of number of poles, and gear ratio.
+
+#define Direct_Measurement 1
+#define Motor_Measurement 2
+#define Measurement_Type Direct_Measurement
+#define Motor_Poles 2
+#define Gear_Ratio 2
+
+#define PulsesPerRevolution 1
+
+#define TestRPM 120
+#define TestPulsePin 8
+
+float rpm;								// Latest RPM value
 volatile unsigned long trigger_time;			// Trigger time of latest interrupt
 volatile unsigned long trigger_time_old;		// Trigger time of last interrupt
 unsigned long last_calc_time;					// Trigger time of last speed calculated
-unsigned int timing;							// Timing of last rotation
-unsigned int timing_old;						// Old rotation timing
+unsigned long timing;							// Timing of last rotation
+unsigned long timing_old;						// Old rotation timing
 
 
 
@@ -47,21 +64,48 @@ static unsigned long fast_loopTimer;			// Time in microseconds of 1000hz control
 static unsigned long fiftyhz_loopTimer;			// Time in microseconds of 50hz control loop
 static unsigned long tenhz_loopTimer;			// Time in microseconds of the 10hz control loop
 static unsigned long onehz_loopTimer;			// Time in microseconds of the 1hz control loop
+unsigned long timer;
+unsigned long outputpulsetime;
+unsigned long outputpulsetiming;
+unsigned long outputpulsetimer;
 
 unsigned int rotation_time;						// Time in microseconds for one rotation of rotor
 
+boolean test;
+
 SCDriver SCOutput;								// Create Speed Control output object
+
+
 
 void setup(){
    Serial.begin(9600);
+   pinMode(2, INPUT);
+   digitalWrite(2, HIGH);       				// Turn on pullup resistor
+   pinMode(TestPulsePin, OUTPUT);
    attachInterrupt(0, rpm_fun, RISING);
    rpm = 0;
    SCOutput.attach(9);
+   Serial.println("Tachometer Test");
+   pinMode(BoardLED, OUTPUT);
+   
+   outputpulsetime = 60000000/TestRPM;
+   
 }
 
 void loop(){
 
-	unsigned long timer = micros();
+	timer = micros();
+	
+	if ( (timer - outputpulsetimer) >= outputpulsetime ){
+		outputpulsetimer = timer;
+		digitalWrite (TestPulsePin, HIGH);
+		digitalWrite(BoardLED, HIGH);
+	} else {
+		digitalWrite(TestPulsePin, LOW);
+	}
+	
+	
+	
 
 	if ((timer - fast_loopTimer) >= 1000){
 	
@@ -94,30 +138,41 @@ void loop(){
 }
 
 void rpm_fun(){							//Each rotation, this interrupt function is run
-	trigger_time_old = trigger_time;
+	
 	trigger_time = micros();
 }
 
 void fastloop(){			//1000hz stuff goes here
 
+	
 	if (last_calc_time < trigger_time){					//micros() timer has not overflowed
 		
 		if (last_calc_time != trigger_time){			//We have new timing data
+			timing_old = timing;
 			timing = trigger_time - trigger_time_old;
-			timing = (timing + timing_old)/2;			//Simple filter
 			last_calc_time = trigger_time;
+			trigger_time_old = trigger_time;
 		}
 	}else{												//micros() timer has overflowed
 
 		last_calc_time = trigger_time;					//we will skip this iteration
+		trigger_time_old = trigger_time;
 
 	}
-}
+	
+	}
 
 void mediumloop(){			//50hz stuff goes here
 
-	rpm = 60000000/timing;
-
+#if Measurement_Type == Direct_Measurement
+	rpm = (60000000.0/(float)timing)/PulsesPerRevolution;
+#elif Measurement_Type == Motor_Measurement
+	rpm = (((60000000.0/(float)timing)/Gear_Ratio)/(Motor_Poles/2));
+#endif
+	
+	digitalWrite(BoardLED, LOW);
+	
+	
 }
 
 void slowloop(){			//10hz stuff goes here
@@ -125,6 +180,11 @@ void slowloop(){			//10hz stuff goes here
 }
 
 void superslowloop(){		//1hz stuff goes here
+
+Serial.print ("RPM =");
+Serial.println(rpm);
+Serial.print ("Timing =");
+Serial.println(timing);
 
 }
 
