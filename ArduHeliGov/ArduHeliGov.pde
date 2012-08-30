@@ -29,29 +29,26 @@ Maximum intended motor RPM is 50,000 representing a 450 heli running 4S battery
 micros() counter will overflow after ~70 minutes, we must protect for that
 to avoid an error or blip in the speed reading.
 
+Measurement Type can be either Direct_Measurement, meaning actual
+propeller measurement.  Or it can be Motor_Measurement.  Motor_Measurement
+requires input of number of poles, and gear ratio.
 
 */
 
 #include <SCDriver.h> 
 
 #define BoardLED 13
-
-// Measurement Type can be either Direct_Measurement, meaning actual
-// propeller measurement.  Or it can be Motor_Measurement.  Motor_Measurement
-// requires input of number of poles, and gear ratio.
-
+#define RPM_Input_1 2
 #define Direct_Measurement 1
 #define Motor_Measurement 2
 #define Measurement_Type Direct_Measurement
 #define Motor_Poles 2
 #define Gear_Ratio 2
-
 #define PulsesPerRevolution 1
-
 #define TestRPM 120
 #define TestPulsePin 8
 
-float rpm;								// Latest RPM value
+float rpm;										// Latest RPM value
 volatile unsigned long trigger_time;			// Trigger time of latest interrupt
 volatile unsigned long trigger_time_old;		// Trigger time of last interrupt
 unsigned long last_calc_time;					// Trigger time of last speed calculated
@@ -71,16 +68,13 @@ unsigned long outputpulsetimer;
 
 unsigned int rotation_time;						// Time in microseconds for one rotation of rotor
 
-boolean test;
-
 SCDriver SCOutput;								// Create Speed Control output object
 
 
 
 void setup(){
    Serial.begin(9600);
-   pinMode(2, INPUT);
-   digitalWrite(2, HIGH);       				// Turn on pullup resistor
+   pinMode(RPM_Input_1, INPUT_PULLUP);
    pinMode(TestPulsePin, OUTPUT);
    attachInterrupt(0, rpm_fun, RISING);
    rpm = 0;
@@ -96,16 +90,7 @@ void loop(){
 
 	timer = micros();
 	
-	if ( (timer - outputpulsetimer) >= outputpulsetime ){
-		outputpulsetimer = timer;
-		digitalWrite (TestPulsePin, HIGH);
-		digitalWrite(BoardLED, HIGH);
-	} else {
-		digitalWrite(TestPulsePin, LOW);
-	}
-	
-	
-	
+	rpm_test_pulse();	
 
 	if ((timer - fast_loopTimer) >= 1000){
 	
@@ -142,6 +127,17 @@ void rpm_fun(){							//Each rotation, this interrupt function is run
 	trigger_time = micros();
 }
 
+void rpm_test_pulse(){
+
+	if ( (timer - outputpulsetimer) >= outputpulsetime ){
+		outputpulsetimer = timer;
+		digitalWrite (TestPulsePin, HIGH);
+	} else {
+		digitalWrite(TestPulsePin, LOW);
+	}
+
+}
+
 void fastloop(){			//1000hz stuff goes here
 
 	
@@ -169,9 +165,6 @@ void mediumloop(){			//50hz stuff goes here
 #elif Measurement_Type == Motor_Measurement
 	rpm = (((60000000.0/(float)timing)/Gear_Ratio)/(Motor_Poles/2));
 #endif
-	
-	digitalWrite(BoardLED, LOW);
-	
 	
 }
 
