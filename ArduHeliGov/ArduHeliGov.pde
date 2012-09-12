@@ -45,8 +45,7 @@ requires input of number of poles, and gear ratio.
 #define Motor_Poles 2
 #define Gear_Ratio 2
 #define PulsesPerRevolution 1
-#define TestRPM 120
-#define TestPulsePin 8
+
 
 float rpm;										// Latest RPM value
 volatile unsigned long trigger_time;			// Trigger time of latest interrupt
@@ -62,9 +61,7 @@ static unsigned long fiftyhz_loopTimer;			// Time in microseconds of 50hz contro
 static unsigned long tenhz_loopTimer;			// Time in microseconds of the 10hz control loop
 static unsigned long onehz_loopTimer;			// Time in microseconds of the 1hz control loop
 unsigned long timer;
-unsigned long outputpulsetime;
-unsigned long outputpulsetiming;
-unsigned long outputpulsetimer;
+
 
 unsigned int rotation_time;						// Time in microseconds for one rotation of rotor
 
@@ -75,22 +72,19 @@ SCDriver SCOutput;								// Create Speed Control output object
 void setup(){
    Serial.begin(9600);
    pinMode(RPM_Input_1, INPUT_PULLUP);
-   pinMode(TestPulsePin, OUTPUT);
    attachInterrupt(0, rpm_fun, RISING);
    rpm = 0;
    SCOutput.attach(9);
    Serial.println("Tachometer Test");
    pinMode(BoardLED, OUTPUT);
    
-   outputpulsetime = 60000000/TestRPM;
+   
    
 }
 
 void loop(){
 
 	timer = micros();
-	
-	rpm_test_pulse();	
 
 	if ((timer - fast_loopTimer) >= 1000){
 	
@@ -127,16 +121,7 @@ void rpm_fun(){							//Each rotation, this interrupt function is run
 	trigger_time = micros();
 }
 
-void rpm_test_pulse(){
 
-	if ( (timer - outputpulsetimer) >= outputpulsetime ){
-		outputpulsetimer = timer;
-		digitalWrite (TestPulsePin, HIGH);
-	} else {
-		digitalWrite(TestPulsePin, LOW);
-	}
-
-}
 
 void fastloop(){			//1000hz stuff goes here
 
