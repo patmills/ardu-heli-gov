@@ -58,21 +58,22 @@ float rpm;										// Latest measured RPM value
 float rpm_demand;								// RPM setpoint after the soft-start ramp
 float rpm_error;								// Current RPM error
 int	torque_demand;								// % throttle to request from controller
-volatile unsigned long trigger_time;			// Trigger time of latest interrupt
-volatile unsigned long trigger_time_old;		// Trigger time of last interrupt
+volatile unsigned long trigger_time = 0;			// Trigger time of latest interrupt
+volatile unsigned long trigger_time_old = 0;		// Trigger time of last interrupt
 unsigned long last_calc_time;					// Trigger time of last speed calculated
 unsigned long timing;							// Timing of last rotation
 unsigned long timing_old;						// Old rotation timing
+bool timing_overflow_skip = false;				// Bit used to signal micros() timer overflowed
 
 
 
-unsigned long fast_loopTimer;			// Time in microseconds of 1000hz control loop
-unsigned long last_fast_loopTimer;		// Time in microseconds of the previous fast loop
-unsigned long fiftyhz_loopTimer;		// Time in milliseconds of 50hz control loop
-unsigned long last_fiftyhz_loopTimer;	// Time in milliseconds of the previous loop, used to calculate dt
-unsigned int fiftyhz_dt;				// Time since the last 50 Hz loop
-unsigned long tenhz_loopTimer;			// Time in milliseconds of the 10hz control loop
-unsigned long onehz_loopTimer;			// Time in milliseconds of the 1hz control loop
+unsigned long fast_loopTimer = 0;			// Time in microseconds of 1000hz control loop
+unsigned long last_fast_loopTimer = 0;		// Time in microseconds of the previous fast loop
+unsigned long fiftyhz_loopTimer = 0;		// Time in milliseconds of 50hz control loop
+unsigned long last_fiftyhz_loopTimer = 0;	// Time in milliseconds of the previous loop, used to calculate dt
+unsigned int fiftyhz_dt= 0 ;				// Time since the last 50 Hz loop
+unsigned long tenhz_loopTimer = 0;			// Time in milliseconds of the 10hz control loop
+unsigned long onehz_loopTimer = 0;			// Time in milliseconds of the 1hz control loop
 
 
 
@@ -102,23 +103,24 @@ void setup(){
 
 void loop(){
 
-unsigned long timer = millis();					// Time in milliseconds of current loop
+unsigned long timer = millis();						// Time in milliseconds of current loop
 
 
 	if (( micros() - fast_loopTimer) >= 1000){
 	
+		fast_loopTimer = micros();
 		if (!micros_overflow()){
-			last_fast_loopTimer = fast_loopTimer;
-			fast_loopTimer = micros();
 			fastloop();
 		} else {
-			last_calc_time = trigger_time;					//we will skip this iteration
-			trigger_time_old = trigger_time;
+			trigger_time_old = 0;					//we will throw out whatever data we have
+			trigger_time = 0;
+			timing_overflow_skip == true;			//and the next one
 		}
+		last_fast_loopTimer = fast_loopTimer;
 
 	}	
 	
-	if ((timer - fiftyhz_loopTimer) >= 20000) {
+	if ((timer - fiftyhz_loopTimer) >= 20) {
 	
 		last_fiftyhz_loopTimer = fiftyhz_loopTimer;
 		fiftyhz_loopTimer = timer;
@@ -127,14 +129,14 @@ unsigned long timer = millis();					// Time in milliseconds of current loop
 	
 	}
 	
-	if ((timer - tenhz_loopTimer) >= 100000) {
+	if ((timer - tenhz_loopTimer) >= 10) {
 	
 		tenhz_loopTimer = timer;
 		slowloop();
 	
 	}
 	
-	if ((timer - onehz_loopTimer) >= 1000000) {
+	if ((timer - onehz_loopTimer) >= 1000) {
 	
 		onehz_loopTimer = timer;
 		superslowloop();
@@ -143,7 +145,7 @@ unsigned long timer = millis();					// Time in milliseconds of current loop
 	
 }
 
-void rpm_fun(){							//Each rotation, this interrupt function is run
+void rpm_fun(){							//Each pulse, this interrupt function is run
 	
 	trigger_time = micros();
 }
@@ -152,13 +154,17 @@ void rpm_fun(){							//Each rotation, this interrupt function is run
 
 void fastloop(){			//1000hz stuff goes here
 	
-	if (last_calc_time != trigger_time){			// We have new timing data to consume
-		timing_old = timing;
-		timing = trigger_time - trigger_time_old;
-		last_calc_time = trigger_time;
-		trigger_time_old = trigger_time;
-	}
 	
+	if (trigger_time_old != trigger_time){			// We have new timing data to consume
+		if (!timing_overflow_skip){				// If micros has not overflowed, we will calculate timing based on this data
+			timing_old = timing;
+			timing = trigger_time - trigger_time_old;
+		} else {									
+			timing_overflow_skip = false;			// If micros has overflowed, reset the skip bit since we have thrown away this bad data
+		}
+		trigger_time_old = trigger_time;			// In either case, we need to do this so we can look for new data
+		
+	}
 }
 
 void mediumloop(){			//50hz stuff goes here
@@ -265,9 +271,17 @@ float get_i(float error, float dt){
 	return 0;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+/*
+The micros() timer will overflow roughly ever 70 minutes.  This is within the possible operating
+time of a UAV so we must protect for it.  When the micros() timer overflows, we must
+ignore any data collected during the period.
+*/
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 bool micros_overflow(){
 
-	if (micros() > last_fast_loopTimer) {
+	if (micros() > last_fast_loopTimer) {			// Micros() have not overflowed because it has incremented since last fast loop
 		return false;
 	} else {
 		return true;
