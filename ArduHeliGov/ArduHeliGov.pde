@@ -37,17 +37,27 @@ requires input of number of poles, and gear ratio.
 
 #include <SCDriver.h> 
 
+#define PID_kp 1.0
+#define PID_ki 0.0
+#define PID_imax 0.0
+
 #define BoardLED 13
 #define RPM_Input_1 2
+#define Arming_Pin 9
 #define Direct_Measurement 1
 #define Motor_Measurement 2
 #define Measurement_Type Direct_Measurement
 #define Motor_Poles 2
 #define Gear_Ratio 2
 #define PulsesPerRevolution 1
+#define RSC_Ramp_Up_Rate 10						// Soft Start Ramp Rate in seconds
+#define Target_RPM 2000
 
 
-float rpm;										// Latest RPM value
+float rpm;										// Latest measured RPM value
+float rpm_demand;								// RPM setpoint after the soft-start ramp
+float rpm_error;								// Current RPM error
+int	torque_demand;								// % throttle to request from controller
 volatile unsigned long trigger_time;			// Trigger time of latest interrupt
 volatile unsigned long trigger_time_old;		// Trigger time of last interrupt
 unsigned long last_calc_time;					// Trigger time of last speed calculated
@@ -56,11 +66,18 @@ unsigned long timing_old;						// Old rotation timing
 
 
 
-static unsigned long fast_loopTimer;			// Time in microseconds of 1000hz control loop
-static unsigned long fiftyhz_loopTimer;			// Time in microseconds of 50hz control loop
-static unsigned long tenhz_loopTimer;			// Time in microseconds of the 10hz control loop
-static unsigned long onehz_loopTimer;			// Time in microseconds of the 1hz control loop
-unsigned long timer;
+unsigned long fast_loopTimer;			// Time in microseconds of 1000hz control loop
+unsigned long last_fast_loopTimer;		// Time in microseconds of the previous fast loop
+unsigned long fiftyhz_loopTimer;		// Time in milliseconds of 50hz control loop
+unsigned long last_fiftyhz_loopTimer;	// Time in milliseconds of the previous loop, used to calculate dt
+unsigned int fiftyhz_dt;				// Time since the last 50 Hz loop
+unsigned long tenhz_loopTimer;			// Time in milliseconds of the 10hz control loop
+unsigned long onehz_loopTimer;			// Time in milliseconds of the 1hz control loop
+
+
+
+
+long PID_integrator;							// Integrator for the PID loop
 
 
 unsigned int rotation_time;						// Time in microseconds for one rotation of rotor
@@ -72,6 +89,7 @@ SCDriver SCOutput;								// Create Speed Control output object
 void setup(){
    Serial.begin(9600);
    pinMode(RPM_Input_1, INPUT_PULLUP);
+   pinMode(Arming_Pin, INPUT_PULLUP);
    attachInterrupt(0, rpm_fun, RISING);
    rpm = 0;
    SCOutput.attach(9);
@@ -84,18 +102,27 @@ void setup(){
 
 void loop(){
 
-	timer = micros();
+unsigned long timer = millis();					// Time in milliseconds of current loop
 
-	if ((timer - fast_loopTimer) >= 1000){
+
+	if (( micros() - fast_loopTimer) >= 1000){
 	
-		fast_loopTimer = timer;
-		fastloop();
+		if (!micros_overflow()){
+			last_fast_loopTimer = fast_loopTimer;
+			fast_loopTimer = micros();
+			fastloop();
+		} else {
+			last_calc_time = trigger_time;					//we will skip this iteration
+			trigger_time_old = trigger_time;
+		}
 
 	}	
 	
 	if ((timer - fiftyhz_loopTimer) >= 20000) {
 	
+		last_fiftyhz_loopTimer = fiftyhz_loopTimer;
 		fiftyhz_loopTimer = timer;
+		fiftyhz_dt = last_fiftyhz_loopTimer - fiftyhz_loopTimer;
 		mediumloop();
 	
 	}
@@ -124,32 +151,30 @@ void rpm_fun(){							//Each rotation, this interrupt function is run
 
 
 void fastloop(){			//1000hz stuff goes here
-
 	
-	if (last_calc_time < trigger_time){					//micros() timer has not overflowed
-		
-		if (last_calc_time != trigger_time){			//We have new timing data
-			timing_old = timing;
-			timing = trigger_time - trigger_time_old;
-			last_calc_time = trigger_time;
-			trigger_time_old = trigger_time;
-		}
-	}else{												//micros() timer has overflowed
-
-		last_calc_time = trigger_time;					//we will skip this iteration
+	if (last_calc_time != trigger_time){			// We have new timing data to consume
+		timing_old = timing;
+		timing = trigger_time - trigger_time_old;
+		last_calc_time = trigger_time;
 		trigger_time_old = trigger_time;
-
 	}
 	
-	}
+}
 
 void mediumloop(){			//50hz stuff goes here
 
-#if Measurement_Type == Direct_Measurement
-	rpm = (60000000.0/(float)timing)/PulsesPerRevolution;
-#elif Measurement_Type == Motor_Measurement
-	rpm = (((60000000.0/(float)timing)/Gear_Ratio)/(Motor_Poles/2));
-#endif
+	rpm = calc_rpm();
+	rpm_demand = linear_ramp();
+	rpm_error = rpm_demand - rpm;
+	if (rpm_demand == 0){
+		torque_demand = 0;
+	} else {
+		torque_demand = get_pi(rpm_error, fiftyhz_dt);
+		torque_demand = constrain (torque_demand, 0, 1000);
+	}
+	SCOutput.write(torque_demand);
+	
+	
 	
 }
 
@@ -159,12 +184,92 @@ void slowloop(){			//10hz stuff goes here
 
 void superslowloop(){		//1hz stuff goes here
 
-Serial.print ("RPM =");
-Serial.println(rpm);
-Serial.print ("Timing =");
-Serial.println(timing);
+	print_status();	
 
 }
 
+float calc_rpm(){
+	
+#if Measurement_Type == Direct_Measurement
+	return (60000000.0/(float)timing)/PulsesPerRevolution;
+#elif Measurement_Type == Motor_Measurement
+	return (((60000000.0/(float)timing)/Gear_Ratio)/(Motor_Poles/2));
+#endif
+}
+
+float linear_ramp(){
+
+static int rsc_ramp;
+float rsc_output;
+			
+	if ( armed() ){
+		if (rsc_ramp < RSC_Ramp_Up_Rate){
+			rsc_ramp++;
+			rsc_output = (float)map(rsc_ramp, 0, RSC_Ramp_Up_Rate * 50, 0, Target_RPM);
+		} else {
+			rsc_output = (float)Target_RPM;
+		}
+		return rsc_output;
+	} else {
+		rsc_ramp--;				//Return RSC Ramp to 0 slowly, allowing for "warm restart"
+		if (rsc_ramp < 0){
+			rsc_ramp = 0;
+		}
+		rsc_output = 0; 		//Just to be sure RSC output is 0
+		return rsc_output;
+	}
+	
+}
+
+bool armed(){
+	if ( digitalRead(Arming_Pin) == LOW ){
+		return true;
+	}else{
+		return false;
+	}
+}
+
+void print_status(){
+	
+	Serial.print ("RPM =");
+	Serial.println(rpm);
+	Serial.print ("Error =");
+	Serial.println(rpm_error);
+	Serial.print ("Torque =");
+	Serial.print (torque_demand);
+	
+}
+
+float get_pi(float error, float dt){
+
+	return get_p(error) + get_i(error, dt);
+}
 
 
+float get_p(float error) {
+
+	return error * PID_kp;
+}
+
+float get_i(float error, float dt){
+
+	if((PID_ki != 0) && (dt != 0)){
+		PID_integrator += (error * PID_ki) * dt;
+		if (PID_integrator < -PID_imax) {
+			PID_integrator = -PID_imax;
+		} else if (PID_integrator > PID_imax) {
+			PID_integrator = PID_imax;
+		}
+		return PID_integrator;
+	}
+	return 0;
+}
+
+bool micros_overflow(){
+
+	if (micros() > last_fast_loopTimer) {
+		return false;
+	} else {
+		return true;
+	}
+}
