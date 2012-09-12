@@ -31,11 +31,11 @@
  
  attach(pin )  - Attaches a servo motor to an i/o pin.
  attach(pin, min, max  ) - Attaches to a pin setting min and max values in microseconds
- default min is 544, max is 2400  
+ default min is 1050, max is 1950  
  
  write()     - Sets the servo angle in degrees.  (invalid angle that is valid as pulse in microseconds is treated as microseconds)
  writeMicroseconds() - Sets the servo pulse width in microseconds 
- read()      - Gets the last written servo pulse width as an angle between 0 and 180. 
+ read()      - Gets the last written servo pulse width as an angle between 0 and 1.00%. 
  readMicroseconds()   - Gets the last written servo pulse width in microseconds. (was read_us() in first release)
  attached()  - Returns true if there is a servo attached. 
  detach()    - Stops an attached servos from pulsing its i/o pin. 
@@ -288,8 +288,8 @@ void SCDriver::write(int value)
   if(value < MIN_PULSE_WIDTH)
   {  // treat values less than 544 as angles in degrees (valid values in microseconds are handled as microseconds)
     if(value < 0) value = 0;
-    if(value > 180) value = 180;
-    value = map(value, 0, 180, SERVO_MIN(),  SERVO_MAX());      
+    if(value > 1000) value = 1000;
+    value = map(value, 0, 1000, SERVO_MIN(),  SERVO_MAX());      
   }
   this->writeMicroseconds(value);
 }
@@ -317,7 +317,7 @@ void SCDriver::writeMicroseconds(int value)
 
 int SCDriver::read() // return the value as degrees
 {
-  return  map( this->readMicroseconds()+1, SERVO_MIN(), SERVO_MAX(), 0, 180);     
+  return  map( this->readMicroseconds()+1, SERVO_MIN(), SERVO_MAX(), 0, 1000);     
 }
 
 int SCDriver::readMicroseconds()

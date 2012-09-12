@@ -43,7 +43,8 @@ requires input of number of poles, and gear ratio.
 
 #define BoardLED 13
 #define RPM_Input_1 2
-#define Arming_Pin 9
+#define Arming_Pin 4
+#define SCOutput_Pin 8
 #define Direct_Measurement 1
 #define Motor_Measurement 2
 #define Measurement_Type Direct_Measurement
@@ -93,7 +94,7 @@ void setup(){
    pinMode(Arming_Pin, INPUT_PULLUP);
    attachInterrupt(0, rpm_fun, RISING);
    rpm = 0;
-   SCOutput.attach(9);
+   SCOutput.attach(SCOutput_Pin);
    Serial.println("Tachometer Test");
    pinMode(BoardLED, OUTPUT);
    
@@ -242,7 +243,7 @@ void print_status(){
 	Serial.print ("Error =");
 	Serial.println(rpm_error);
 	Serial.print ("Torque =");
-	Serial.print (torque_demand);
+	Serial.println (torque_demand);
 	
 }
 
