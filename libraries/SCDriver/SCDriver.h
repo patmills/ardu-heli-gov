@@ -89,7 +89,7 @@ typedef enum { _timer1, _Nbr_16timers } timer16_Sequence_t ;
 #define MIN_PULSE_WIDTH       1050     // the shortest pulse sent to a SC  
 #define MAX_PULSE_WIDTH      1950     // the longest pulse sent to a SC 
 #define DEFAULT_PULSE_WIDTH  1500     // default pulse width when SC is attached
-#define REFRESH_INTERVAL    20000     // minumim time to refresh servos in microseconds 
+#define REFRESH_INTERVAL    4000     // minumim time to refresh servos in microseconds 
 
 #define SERVOS_PER_TIMER       12     // the maximum number of SC controlled by one timer 
 #define MAX_SERVOS   (_Nbr_16timers  * SERVOS_PER_TIMER)
