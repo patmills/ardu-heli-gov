@@ -1,0 +1,1 @@
+This is a project to create an RC Helicopter Motor Speed Governor, to be run on an Arduino board, and intending to interface with Arducopter.
